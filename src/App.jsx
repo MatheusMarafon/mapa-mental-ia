@@ -1,12 +1,19 @@
 import React, { useState, useRef } from 'react';
-// --- MUDANÇA 1: Importar 'Handle' e 'Position' ---
-import ReactFlow, { MiniMap, Controls, Background, Handle, Position } from 'reactflow';
+import ReactFlow, { 
+  MiniMap, 
+  Controls, 
+  Background, 
+  Handle, 
+  Position, 
+  useNodesState,
+  useEdgesState 
+} from 'reactflow';
 import 'reactflow/dist/style.css'; 
 import * as htmlToImage from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Brain, Download, ArrowLeft, Lightbulb, FileText } from 'lucide-react';
+import { Brain, Download, ArrowLeft, Lightbulb, FileText, Lock, Unlock } from 'lucide-react'; 
 
 // --- (Prompt, cleanJsonString, animationVariants - Sem mudanças) ---
 const getPrompt = (tema) => {
@@ -41,15 +48,11 @@ const animationVariants = {
   exit: { opacity: 0, y: -20 },
 };
 
-// --- MUDANÇA 2: O NOSSO COMPONENTE DE NÓ PERSONALIZADO ---
-// Este é um novo componente React que define como um "nó" deve parecer
+// --- (Componente MindMapNode - Sem mudanças) ---
 const MindMapNode = ({ data }) => {
-  // O 'data' agora contém: label, descricao, e o id que injetamos
   const isMainNode = data.id === '1';
-
   return (
     <>
-      {/* Handle (Alça) de Cima: Só aparece se NÃO for o nó principal */}
       {!isMainNode && (
         <Handle 
           type="target" 
@@ -57,12 +60,10 @@ const MindMapNode = ({ data }) => {
           className="!bg-gray-400"
         />
       )}
-      
-      {/* O Corpo do Nó */}
       <div 
         className={`
           p-4 rounded-xl shadow-lg border-2
-          w-64 break-words {/* Largura fixa, quebra de linha */}
+          w-64 break-words
           ${isMainNode 
             ? 'bg-gradient-to-br from-blue-600 to-green-600 text-white border-blue-700' 
             : 'bg-white border-gray-200'}
@@ -76,8 +77,6 @@ const MindMapNode = ({ data }) => {
           {data.descricao}
         </p>
       </div>
-
-      {/* Handle (Alça) de Baixo: Para saídas */}
       <Handle 
         type="source" 
         position={Position.Bottom} 
@@ -87,28 +86,29 @@ const MindMapNode = ({ data }) => {
   );
 };
 
-// --- MUDANÇA 3: REGISTRAR O NÓ ---
-// Diz ao React Flow que sempre que ele ver um nó do tipo "mindmap", 
-// ele deve usar o componente 'MindMapNode' que criamos.
 const nodeTypes = { mindmap: MindMapNode };
 
 // --- Começa o componente App ---
 function App() {
   const [tema, setTema] = useState('');
-  const [nodes, setNodes] = useState([]);
-  const [edges, setEdges] = useState([]);
   const [resumo, setResumo] = useState(''); 
   const [telaAtual, setTelaAtual] = useState('HOME');
   const mapRef = useRef(null);
-
-  // --- MUDANÇA 4: ATUALIZAR O HANDLEGERARMAPA ---
+  
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  
+  const [isLocked, setIsLocked] = useState(false);
+  
+  // --- (handleGerarMapa, handleVoltar - Sem mudanças) ---
   const handleGerarMapa = async () => {
     if (!tema) {
       alert("Por favor, digite um tema.");
       return;
     }
     setTelaAtual('LOADING');
-    setNodes([]);
+    setNodes([]); 
+    setEdges([]); 
     setResumo('');
     
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -134,23 +134,19 @@ function App() {
       respostaJsonString = cleanJsonString(respostaJsonString);
       const dadosCompletos = JSON.parse(respostaJsonString);
       
-      // AQUI processamos os dados da IA
-      
-      // 1. Processa os Nós
       const processedNodes = dadosCompletos.mapa.nodes.map(n => ({
-        ...n, // Mantém id, position
-        type: 'mindmap', // Diz ao React Flow para usar nosso nó customizado
+        ...n,
+        type: 'mindmap',
         data: {
-          ...n.data, // Mantém label, descricao
-          id: n.id  // Injeta o ID no 'data' para sabermos qual é o nó principal
+          ...n.data,
+          id: n.id
         }
       }));
 
-      // 2. Processa as Arestas (Linhas)
       const processedEdges = dadosCompletos.mapa.edges.map(e => ({
         ...e,
-        animated: true, // Faz a linha ser animada!
-        style: { stroke: '#6b7280', strokeWidth: 2 } // Estiliza a linha
+        animated: true,
+        style: { stroke: '#6b7280', strokeWidth: 2 }
       }));
 
       setNodes(processedNodes);
@@ -166,7 +162,6 @@ function App() {
     }
   };
 
-  // --- (handleVoltar - Sem mudanças) ---
   const handleVoltar = () => {
     setTema('');
     setNodes([]);
@@ -175,12 +170,14 @@ function App() {
     setTelaAtual('HOME');
   };
 
-  // --- MUDANÇA 5: ATUALIZAR O PDF ---
-  // (Atualiza o PDF para formatar os tópicos com 'label' e 'descricao')
   const handleExportPDF = async () => {
     if (mapRef.current === null) {
       return;
     }
+    // Des-seleciona os nós antes da foto
+    document.querySelectorAll('.react-flow__node').forEach(n => n.blur());
+    await new Promise(r => setTimeout(r, 50)); 
+
     document.body.style.cursor = 'wait';
     try {
       const dataUrl = await htmlToImage.toPng(mapRef.current, { cacheBust: true });
@@ -211,7 +208,7 @@ function App() {
       
       const resumoHeight = (resumoLines.length * 5) + 20;
 
-      // Adiciona os Tópicos (Agora com label + descricao)
+      // Adiciona os Tópicos
       pdf.setFont('Inter', 'bold');
       pdf.setFontSize(16);
       pdf.text('Principais Tópicos', margin, resumoHeight);
@@ -219,10 +216,9 @@ function App() {
       pdf.setFont('Inter', 'normal');
       pdf.setFontSize(12);
       
-      // Formata o texto dos tópicos (label + descricao)
       const topicosText = nodes.map(node => {
-        return `• ${node.data.label}\n   ${node.data.descricao || 'Sem descrição.'}`; // Título e descrição recuada
-      }).join('\n\n'); // Espaço duplo entre os tópicos
+        return `• ${node.data.label}\n   ${node.data.descricao || 'Sem descrição.'}`;
+      }).join('\n\n'); 
 
       const topicosLines = pdf.splitTextToSize(topicosText, contentWidth);
       pdf.text(topicosLines, margin, resumoHeight + 10);
@@ -250,7 +246,11 @@ function App() {
             {telaAtual === 'HOME' && (
               <motion.div 
                 key="home" 
-                // ... (código da home sem mudanças)
+                variants={animationVariants} 
+                initial="initial" 
+                animate="animate" 
+                exit="exit" 
+                transition={{ duration: 0.4 }}
                 className="flex flex-col items-center"
               >
                 <motion.div
@@ -352,8 +352,12 @@ function App() {
             {telaAtual === 'LOADING' && (
               <motion.div 
                 key="loading" 
-                // ... (código do loading sem mudanças)
                 className="flex flex-col items-center justify-center min-h-[80vh]"
+                variants={animationVariants} 
+                initial="initial" 
+                animate="animate" 
+                exit="exit" 
+                transition={{ duration: 0.4 }}
               >
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -417,7 +421,7 @@ function App() {
                   </button>
                 </div>
 
-                {/* --- MUDANÇA 6: O CONTAINER DO MAPA --- */}
+                {/* --- O CONTAINER DO MAPA (COM A CORREÇÃO) --- */}
                 <div className="relative group mb-8">
                   <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-green-600 rounded-3xl blur opacity-20 group-hover:opacity-30 transition duration-300" />
                   <div 
@@ -428,10 +432,36 @@ function App() {
                     <ReactFlow
                       nodes={nodes}
                       edges={edges}
-                      nodeTypes={nodeTypes} // <-- Diz ao React Flow para usar nossos nós
+                      nodeTypes={nodeTypes} 
                       fitView
+                      onNodesChange={onNodesChange}
+                      onEdgesChange={onEdgesChange}
+                      
+                      // --- NOSSAS PROPS DE TRAVA TOTAL ---
+                      nodesDraggable={!isLocked}
+                      nodesFocusable={!isLocked}
+                      edgesFocusable={!isLocked}
+                      panOnDrag={!isLocked}
+                      zoomOnScroll={!isLocked}
+                      zoomOnPinch={!isLocked}
+                      zoomOnDoubleClick={!isLocked}
+                      
+                      // --- A LINHA DA CORREÇÃO ---
+                      // Libera o scroll para a página quando travado
+                      preventScrolling={!isLocked} 
                     >
-                      <Controls />
+                      <Controls showInteractive={false}> {/* Esconde o cadeado padrão */}
+                        
+                        {/* Nosso botão de trava customizado */}
+                        <button 
+                          onClick={() => setIsLocked(!isLocked)} 
+                          className="react-flow__controls-button" 
+                          title={isLocked ? "Desbloquear Mapa" : "Bloquear Mapa"}
+                        >
+                          {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                        </button>
+
+                      </Controls>
                       <MiniMap 
                         nodeColor={(node) => '#2563eb'}
                         maskColor="rgba(37, 99, 235, 0.1)"
@@ -461,21 +491,18 @@ function App() {
                   </p>
                 </motion.div>
 
-                {/* Grid de Cards (Tópicos e Exportação) */}
+                {/* Grid de Cards (Tópicos e Exportação) (Sem mudanças) */}
                 <div className="grid md:grid-cols-2 gap-6">
-                  
-                  {/* --- MUDANÇA 7: O CARD DE TÓPICOS --- */}
                   <div className="bg-white/80 backdrop-blur-lg rounded-2xl shadow-xl border border-white/20 p-8">
                     <div className="flex items-center gap-3 mb-6">
                       <div className="p-2 bg-gradient-to-br from-blue-600 to-green-600 rounded-lg">
                         <Brain className="w-6 h-6 text-white" />
                       </div>
                       <h3 className="text-2xl font-bold text-gray-800">
-                        Principais TópICOS
+                        Principais Tópicos
                       </h3>
                     </div>
-                    {/* Agora mostramos o label (negrito) e a descricao */}
-                    <ul className="space-y-4"> {/* Aumenta o espaço entre os tópicos */}
+                    <ul className="space-y-4"> 
                       {nodes.map((node, idx) => (
                         <motion.li 
                           key={node.id}
@@ -486,9 +513,7 @@ function App() {
                         >
                           <div className="w-2 h-2 bg-gradient-to-br from-blue-600 to-green-600 rounded-full mt-2 flex-shrink-0" />
                           <div>
-                            {/* O Título do Tópico */}
                             <span className="font-bold text-gray-800">{node.data.label}</span>
-                            {/* A Descrição do Tópico */}
                             <p className="text-gray-600 text-sm">{node.data.descricao}</p>
                           </div>
                         </motion.li>
@@ -496,7 +521,6 @@ function App() {
                     </ul>
                   </div>
 
-                  {/* Card de Exportação (Atualizado) */}
                   <div className="bg-gradient-to-br from-blue-600 to-green-600 rounded-2xl shadow-xl border border-white/20 p-8 text-white">
                     <div className="flex items-center gap-3 mb-6">
                       <Download className="w-8 h-8" />
